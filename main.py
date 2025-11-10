@@ -9,8 +9,6 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay, PrecisionRecallDisplay
 )
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.datasets import make_classification
 import sqlite3
 from datetime import datetime
 
@@ -32,14 +30,12 @@ app.add_middleware(
 accuracy = precision = recall = f1 = roc_auc = None
 cm = None
 initialization_error = None
-using_demo_model = False  # Nueva variable para trackear modo demo
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "modelo_rf.pkl")       # RandomForest
 SCALER_PATH = os.path.join(BASE_DIR, "scaler.pkl")
 COLUMNS_PATH = os.path.join(BASE_DIR, "columnas_esperadas.pkl")
 ENCODERS_PATH = os.path.join(BASE_DIR, "label_encoders.pkl")
-DATA_PATH = os.path.join(BASE_DIR, "bank-full.csv")
 
 DB_PATH = os.path.join(BASE_DIR, "rf_metrics.db")
 PLOTS_DIR = os.path.join(BASE_DIR, "plots")
@@ -48,42 +44,6 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 CONFUSION_PATH = os.path.join(PLOTS_DIR, "confusion_matrix.png")
 ROC_PATH = os.path.join(PLOTS_DIR, "roc_curve.png")
 PR_PATH = os.path.join(PLOTS_DIR, "precision_recall_curve.png")
-
-# ===============================
-# Función para crear modelo demo
-# ===============================
-def create_demo_model():
-    """Crear modelo y datos de demostración cuando los archivos reales fallan"""
-    print("🔄 Creando modelo de demostración...")
-    
-    # Generar datos sintéticos
-    X, y = make_classification(
-        n_samples=2000, 
-        n_features=10, 
-        n_redundant=2, 
-        n_informative=8,
-        n_clusters_per_class=1, 
-        random_state=42
-    )
-    
-    # Entrenar modelo de demo
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(X, y)
-    
-    # Hacer predicciones
-    y_pred = model.predict(X)
-    y_prob = model.predict_proba(X)[:, 1]
-    
-    # Calcular métricas
-    accuracy = accuracy_score(y, y_pred)
-    precision = precision_score(y, y_pred)
-    recall = recall_score(y, y_pred)
-    f1 = f1_score(y, y_pred)
-    roc_auc = roc_auc_score(y, y_prob)
-    cm = confusion_matrix(y, y_pred)
-    
-    print("✅ Modelo de demostración creado exitosamente")
-    return model, X, y, y_pred, y_prob, accuracy, precision, recall, f1, roc_auc, cm
 
 # ===============================
 # Base de datos
@@ -98,22 +58,21 @@ def initialize_db():
             precision REAL,
             recall REAL,
             f1_score REAL,
-            roc_auc REAL,
-            model_type TEXT
+            roc_auc REAL
         )
     """)
     conn.commit()
     conn.close()
 
-def record_metrics(acc, prec, rec, f1s, roc, model_type="real"):
+def record_metrics(acc, prec, rec, f1s, roc):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            INSERT INTO metric_history (timestamp, accuracy, precision, recall, f1_score, roc_auc, model_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (timestamp, acc, prec, rec, f1s, roc, model_type))
+            INSERT INTO metric_history (timestamp, accuracy, precision, recall, f1_score, roc_auc)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (timestamp, acc, prec, rec, f1s, roc))
         conn.commit()
     finally:
         conn.close()
@@ -124,13 +83,12 @@ initialize_db()
 # Inicialización modelo + datos
 # ===============================
 try:
-    # Intentar cargar archivos reales
     model = joblib.load(MODEL_PATH)
     scaler = joblib.load(SCALER_PATH)
     columnas_esperadas = joblib.load(COLUMNS_PATH)
     encoders = joblib.load(ENCODERS_PATH)
 
-    df_raw = pd.read_csv(DATA_PATH, sep=';')
+    df_raw = pd.read_csv(os.path.join(BASE_DIR, "bank-full.csv"), sep=';')
     df_raw['y'] = df_raw['y'].map({'yes':1,'no':0})
 
     # Aplicar LabelEncoder
@@ -165,52 +123,35 @@ try:
     roc_auc = roc_auc_score(y, y_prob)
     cm = confusion_matrix(y, y_pred)
 
-    record_metrics(accuracy, precision, recall, f1, roc_auc, "real")
-    using_demo_model = False
+    record_metrics(accuracy, precision, recall, f1, roc_auc)
 
-except Exception as e:
-    print(f"❌ Error cargando modelo real: {e}")
-    print("🔄 Usando modelo de demostración...")
-    
-    # Crear modelo demo
-    model, X, y, y_pred, y_prob, accuracy, precision, recall, f1, roc_auc, cm = create_demo_model()
-    record_metrics(accuracy, precision, recall, f1, roc_auc, "demo")
-    using_demo_model = True
-    initialization_error = f"Modelo real no disponible. Usando demo. Error: {str(e)}"
-
-# Generar gráficas (funciona para ambos modos)
-try:
-    plt.style.use('default')  # Cambiar a tema por defecto para mejor compatibilidad
+    # Gráficas
+    plt.style.use('dark_background')
 
     fig, ax = plt.subplots(figsize=(8,6))
     ConfusionMatrixDisplay(cm, display_labels=["No","Yes"]).plot(ax=ax)
-    plt.title(f"Matriz de Confusión - RF ({'DEMO' if using_demo_model else 'REAL'})")
+    plt.title("Matriz de Confusión - RF")
     plt.tight_layout()
-    plt.savefig(CONFUSION_PATH, dpi=150, bbox_inches='tight')
+    plt.savefig(CONFUSION_PATH, dpi=300, bbox_inches='tight')
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(8,6))
     RocCurveDisplay.from_predictions(y, y_prob, ax=ax)
-    plt.title(f"Curva ROC/AUC - RF ({'DEMO' if using_demo_model else 'REAL'})")
+    plt.title("Curva ROC/AUC - RF")
     plt.tight_layout()
-    plt.savefig(ROC_PATH, dpi=150, bbox_inches='tight')
+    plt.savefig(ROC_PATH, dpi=300, bbox_inches='tight')
     plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(8,6))
     PrecisionRecallDisplay.from_predictions(y, y_prob, ax=ax)
-    plt.title(f"Curva Precisión vs Recall - RF ({'DEMO' if using_demo_model else 'REAL'})")
+    plt.title("Curva Precisión vs Recall - RF")
     plt.tight_layout()
-    plt.savefig(PR_PATH, dpi=150, bbox_inches='tight')
+    plt.savefig(PR_PATH, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    
-    print("✅ Gráficas generadas exitosamente")
 
 except Exception as e:
-    print(f"❌ Error generando gráficas: {e}")
-    if initialization_error:
-        initialization_error += f" | Error gráficas: {str(e)}"
-    else:
-        initialization_error = f"Error generando gráficas: {str(e)}"
+    initialization_error = str(e)
+    print(f"ERROR FATAL DURANTE LA INICIALIZACIÓN: {initialization_error}")
 
 # ===============================
 # Endpoints FastAPI
@@ -218,39 +159,23 @@ except Exception as e:
 @app.get("/")
 def root():
     if initialization_error:
-        return {
-            "message": "API iniciada con errores", 
-            "error": initialization_error,
-            "model_type": "demo" if using_demo_model else "real",
-            "status": "warning" if using_demo_model else "error"
-        }
-    return {
-        "message": "API de Clasificación RF con métricas y gráficas",
-        "model_type": "demo" if using_demo_model else "real",
-        "status": "running"
-    }
+        return {"message":"API iniciada con errores", "error": initialization_error}
+    return {"message":"API de Clasificación RF con métricas y gráficas"}
 
 @app.get("/metrics")
 def get_metrics():
-    if initialization_error and not using_demo_model:
-        return JSONResponse(
-            status_code=500, 
-            content={"error": initialization_error}
-        )
-    
-    tn, fp, fn, tp = cm.ravel() if cm is not None else (0, 0, 0, 0)
-    
+    if initialization_error:
+        return JSONResponse(status_code=500, content={"error":initialization_error})
+    tn, fp, fn, tp = cm.ravel()
     return JSONResponse({
-        "Modelo": "RandomForest",
-        "Model_Type": "demo" if using_demo_model else "real",
-        "Accuracy": round(accuracy, 4) if accuracy else 0,
-        "Precision": round(precision, 4) if precision else 0,
-        "Recall": round(recall, 4) if recall else 0,
-        "F1_Score": round(f1, 4) if f1 else 0,
-        "ROC_AUC": round(roc_auc, 4) if roc_auc else 0,
-        "Confusion_Matrix": cm.tolist() if cm is not None else [],
-        "tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp),
-        "note": "Usando modelo de demostración" if using_demo_model else "Modelo real cargado"
+        "Modelo":"RandomForest",
+        "Accuracy": round(accuracy,4),
+        "Precision": round(precision,4),
+        "Recall": round(recall,4),
+        "F1_Score": round(f1,4),
+        "ROC_AUC": round(roc_auc,4),
+        "Confusion_Matrix": cm.tolist(),
+        "tn": int(tn), "fp": int(fp), "fn": int(fn), "tp": int(tp)
     })
 
 @app.get("/history")
@@ -262,95 +187,27 @@ def get_history():
         cursor.execute("SELECT * FROM metric_history ORDER BY timestamp ASC")
         rows = cursor.fetchall()
         conn.close()
-        
-        history_data = [dict(row) for row in rows]
-        return JSONResponse({
-            "data": history_data,
-            "current_model_type": "demo" if using_demo_model else "real"
-        })
+        return JSONResponse([dict(row) for row in rows])
     except Exception as e:
-        return JSONResponse(
-            status_code=500, 
-            content={"error": str(e)}
-        )
+        return JSONResponse(status_code=500, content={"error":str(e)})
 
 @app.get("/plot/confusion")
 def get_confusion_plot():
-    if initialization_error and not using_demo_model:
-        return JSONResponse(
-            status_code=500, 
-            content={"error": initialization_error}
-        )
-    
-    if not os.path.exists(CONFUSION_PATH):
-        return JSONResponse(
-            status_code=404, 
-            content={"error": "Gráfica no disponible"}
-        )
-    
+    if initialization_error:
+        return JSONResponse(status_code=500, content={"error":initialization_error})
     return FileResponse(CONFUSION_PATH)
 
 @app.get("/plot/roc")
 def get_roc_plot():
-    if initialization_error and not using_demo_model:
-        return JSONResponse(
-            status_code=500, 
-            content={"error": initialization_error}
-        )
-    
-    if not os.path.exists(ROC_PATH):
-        return JSONResponse(
-            status_code=404, 
-            content={"error": "Gráfica no disponible"}
-        )
-    
+    if initialization_error:
+        return JSONResponse(status_code=500, content={"error":initialization_error})
     return FileResponse(ROC_PATH)
 
 @app.get("/plot/precision_recall")
 def get_precision_recall_plot():
-    if initialization_error and not using_demo_model:
-        return JSONResponse(
-            status_code=500, 
-            content={"error": initialization_error}
-        )
-    
-    if not os.path.exists(PR_PATH):
-        return JSONResponse(
-            status_code=404, 
-            content={"error": "Gráfica no disponible"}
-        )
-    
+    if initialization_error:
+        return JSONResponse(status_code=500, content={"error":initialization_error})
     return FileResponse(PR_PATH)
-
-@app.get("/health")
-def health_check():
-    return {
-        "status": "healthy" if not initialization_error or using_demo_model else "unhealthy",
-        "model_type": "demo" if using_demo_model else "real",
-        "model_loaded": True,
-        "timestamp": datetime.now().isoformat(),
-        "initialization_error": initialization_error
-    }
-
-@app.get("/debug")
-def debug_info():
-    """Endpoint para información de debug"""
-    return {
-        "files_exist": {
-            "modelo_rf.pkl": os.path.exists(MODEL_PATH),
-            "scaler.pkl": os.path.exists(SCALER_PATH),
-            "columnas_esperadas.pkl": os.path.exists(COLUMNS_PATH),
-            "label_encoders.pkl": os.path.exists(ENCODERS_PATH),
-            "bank-full.csv": os.path.exists(DATA_PATH)
-        },
-        "using_demo_model": using_demo_model,
-        "initialization_error": initialization_error,
-        "plots_exist": {
-            "confusion_matrix": os.path.exists(CONFUSION_PATH),
-            "roc_curve": os.path.exists(ROC_PATH),
-            "precision_recall": os.path.exists(PR_PATH)
-        }
-    }
 
 # ===============================
 # Ejecutar API
