@@ -32,7 +32,7 @@ cm = None
 initialization_error = None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "modelo_svm.pkl")       # RandomForest
+MODEL_PATH = os.path.join(BASE_DIR, "modelo_rf.pkl")       # RandomForest
 SCALER_PATH = os.path.join(BASE_DIR, "scaler.pkl")
 COLUMNS_PATH = os.path.join(BASE_DIR, "columnas_esperadas.pkl")
 ENCODERS_PATH = os.path.join(BASE_DIR, "label_encoders.pkl")
