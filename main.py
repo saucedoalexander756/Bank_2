@@ -9,6 +9,8 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay, PrecisionRecallDisplay
 )
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.datasets import make_classification
 import sqlite3
 from datetime import datetime
 import traceback
@@ -31,6 +33,7 @@ app.add_middleware(
 accuracy = precision = recall = f1 = roc_auc = None
 cm = None
 initialization_error = None
+using_demo_model = False
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, "modelo_rf.pkl")
@@ -61,7 +64,8 @@ def initialize_db():
                 precision REAL,
                 recall REAL,
                 f1_score REAL,
-                roc_auc REAL
+                roc_auc REAL,
+                model_type TEXT
             )
         """)
         conn.commit()
@@ -70,25 +74,78 @@ def initialize_db():
     except Exception as e:
         print(f"⚠️ Error inicializando BD: {e}")
 
-def record_metrics(acc, prec, rec, f1s, roc):
+def record_metrics(acc, prec, rec, f1s, roc, model_type="real"):
     try:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO metric_history (timestamp, accuracy, precision, recall, f1_score, roc_auc)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (timestamp, acc, prec, rec, f1s, roc))
+            INSERT INTO metric_history (timestamp, accuracy, precision, recall, f1_score, roc_auc, model_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (timestamp, acc, prec, rec, f1s, roc, model_type))
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"⚠️ Error guardando métricas: {e}")
 
 # ===============================
+# Crear modelo de demostración
+# ===============================
+def create_demo_model():
+    """Crear un modelo de demostración cuando los archivos están corruptos"""
+    print("🔄 Creando modelo de demostración...")
+    
+    # Generar datos sintéticos
+    X, y = make_classification(
+        n_samples=2000, 
+        n_features=10, 
+        n_redundant=2, 
+        n_informative=8,
+        n_clusters_per_class=1, 
+        random_state=42
+    )
+    
+    # Entrenar modelo
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(X, y)
+    
+    # Calcular métricas
+    y_pred = model.predict(X)
+    y_prob = model.predict_proba(X)[:, 1]
+    
+    accuracy = accuracy_score(y, y_pred)
+    precision = precision_score(y, y_pred)
+    recall = recall_score(y, y_pred)
+    f1 = f1_score(y, y_pred)
+    roc_auc = roc_auc_score(y, y_prob)
+    cm = confusion_matrix(y, y_pred)
+    
+    print("✅ Modelo de demostración creado")
+    return model, X, y, y_pred, y_prob, accuracy, precision, recall, f1, roc_auc, cm
+
+# ===============================
+# Cargar archivos con manejo de errores
+# ===============================
+def safe_load_file(file_path, file_type):
+    """Cargar archivo con manejo de errores"""
+    try:
+        if not os.path.exists(file_path):
+            return None, f"Archivo {file_type} no encontrado"
+        
+        data = joblib.load(file_path)
+        print(f"✅ {file_type} cargado correctamente")
+        return data, None
+        
+    except Exception as e:
+        error_msg = f"Error cargando {file_type}: {str(e)}"
+        print(f"❌ {error_msg}")
+        return None, error_msg
+
+# ===============================
 # Inicialización modelo + datos
 # ===============================
 def initialize_app():
-    global accuracy, precision, recall, f1, roc_auc, cm, initialization_error
+    global accuracy, precision, recall, f1, roc_auc, cm, initialization_error, using_demo_model
     
     try:
         print("🔄 Iniciando inicialización...")
@@ -100,81 +157,80 @@ def initialize_app():
                 raise FileNotFoundError(f"Archivo no encontrado: {file_path}")
             print(f"✅ Archivo encontrado: {os.path.basename(file_path)}")
 
-        print("📦 Cargando modelo...")
-        model = joblib.load(MODEL_PATH)
-        print("✅ Modelo cargado")
-
-        print("📦 Cargando scaler...")
-        scaler = joblib.load(SCALER_PATH)
-        print("✅ Scaler cargado")
-
-        print("📦 Cargando columnas...")
-        columnas_esperadas = joblib.load(COLUMNS_PATH)
-        print("✅ Columnas cargadas")
-
-        print("📦 Cargando encoders...")
-        encoders = joblib.load(ENCODERS_PATH)
-        print("✅ Encoders cargados")
-
-        print("📦 Cargando datos...")
-        df_raw = pd.read_csv(DATA_PATH, sep=';')
-        print(f"✅ Datos cargados: {df_raw.shape}")
+        # Intentar cargar archivos reales
+        model, model_error = safe_load_file(MODEL_PATH, "modelo")
+        scaler, scaler_error = safe_load_file(SCALER_PATH, "scaler")
+        columnas_esperadas, cols_error = safe_load_file(COLUMNS_PATH, "columnas")
+        encoders, encoders_error = safe_load_file(ENCODERS_PATH, "encoders")
         
-        df_raw['y'] = df_raw['y'].map({'yes':1,'no':0})
-        print("✅ Target convertido")
+        # Si algún archivo está corrupto, usar demo
+        if any(error is not None for error in [model_error, scaler_error, cols_error, encoders_error]):
+            print("⚠️  Archivos corruptos, usando modelo de demostración...")
+            using_demo_model = True
+            
+            model, X, y, y_pred, y_prob, accuracy, precision, recall, f1, roc_auc, cm = create_demo_model()
+            
+        else:
+            print("📦 Cargando datos reales...")
+            df_raw = pd.read_csv(DATA_PATH, sep=';')
+            print(f"✅ Datos cargados: {df_raw.shape}")
+            
+            df_raw['y'] = df_raw['y'].map({'yes':1,'no':0})
+            print("✅ Target convertido")
 
-        # Aplicar LabelEncoder
-        print("🔧 Aplicando LabelEncoders...")
-        for col, le in encoders.items():
-            if col in df_raw.columns:
-                print(f"   Procesando columna: {col}")
-                valores_validos = set(le.classes_)
-                df_raw[col] = df_raw[col].astype(str).apply(
-                    lambda x: x if x in valores_validos else list(valores_validos)[0]
-                )
-                df_raw[col] = le.transform(df_raw[col].astype(str))
-        print("✅ LabelEncoders aplicados")
+            # Aplicar LabelEncoder
+            print("🔧 Aplicando LabelEncoders...")
+            for col, le in encoders.items():
+                if col in df_raw.columns:
+                    print(f"   Procesando columna: {col}")
+                    valores_validos = set(le.classes_)
+                    df_raw[col] = df_raw[col].astype(str).apply(
+                        lambda x: x if x in valores_validos else list(valores_validos)[0]
+                    )
+                    df_raw[col] = le.transform(df_raw[col].astype(str))
+            print("✅ LabelEncoders aplicados")
 
-        # Preparar X
-        print("🔧 Preparando features...")
-        X = df_raw.drop('y', axis=1)
-        for col in columnas_esperadas:
-            if col not in X.columns:
-                X[col] = 0
-        X = X[columnas_esperadas]
-        print(f"✅ Features preparadas: {X.shape}")
+            # Preparar X
+            print("🔧 Preparando features...")
+            X = df_raw.drop('y', axis=1)
+            for col in columnas_esperadas:
+                if col not in X.columns:
+                    X[col] = 0
+            X = X[columnas_esperadas]
+            print(f"✅ Features preparadas: {X.shape}")
 
-        print("🔧 Aplicando scaler...")
-        numeric_cols = ['age','balance','day','duration','campaign','pdays','previous']
-        X[numeric_cols] = scaler.transform(X[numeric_cols])
-        print("✅ Scaler aplicado")
+            print("🔧 Aplicando scaler...")
+            numeric_cols = ['age','balance','day','duration','campaign','pdays','previous']
+            X[numeric_cols] = scaler.transform(X[numeric_cols])
+            print("✅ Scaler aplicado")
 
-        y = df_raw['y']
-        
-        print("🔮 Haciendo predicciones...")
-        y_pred = model.predict(X)
-        
-        try:
-            y_prob = model.predict_proba(X)[:,1]
-            print("✅ Probabilidades obtenidas")
-        except AttributeError:
-            print("⚠️  No hay predict_proba, usando alternativo")
-            probs = model.predict(X)
-            y_prob = MinMaxScaler().fit_transform(probs.reshape(-1,1)).flatten()
+            y = df_raw['y']
+            
+            print("🔮 Haciendo predicciones...")
+            y_pred = model.predict(X)
+            
+            try:
+                y_prob = model.predict_proba(X)[:,1]
+                print("✅ Probabilidades obtenidas")
+            except AttributeError:
+                print("⚠️  No hay predict_proba, usando alternativo")
+                probs = model.predict(X)
+                y_prob = MinMaxScaler().fit_transform(probs.reshape(-1,1)).flatten()
 
-        # Calcular métricas
-        print("📊 Calculando métricas...")
-        accuracy = accuracy_score(y, y_pred)
-        precision = precision_score(y, y_pred)
-        recall = recall_score(y, y_pred)
-        f1 = f1_score(y, y_pred)
-        roc_auc = roc_auc_score(y, y_prob)
-        cm = confusion_matrix(y, y_pred)
-        print("✅ Métricas calculadas")
+            # Calcular métricas
+            print("📊 Calculando métricas...")
+            accuracy = accuracy_score(y, y_pred)
+            precision = precision_score(y, y_pred)
+            recall = recall_score(y, y_pred)
+            f1 = f1_score(y, y_pred)
+            roc_auc = roc_auc_score(y, y_prob)
+            cm = confusion_matrix(y, y_pred)
+            print("✅ Métricas calculadas")
 
         # Inicializar BD y guardar métricas
         initialize_db()
-        record_metrics(accuracy, precision, recall, f1, roc_auc)
+        model_type = "demo" if using_demo_model else "real"
+        record_metrics(accuracy, precision, recall, f1, roc_auc, model_type)
         print("✅ Métricas guardadas en BD")
 
         # Generar gráficas
@@ -227,7 +283,8 @@ def root():
         }
     return {
         "message": "API de Clasificación RF con métricas y gráficas",
-        "status": "running"
+        "status": "running",
+        "model_type": "demo" if using_demo_model else "real"
     }
 
 @app.get("/metrics")
@@ -245,6 +302,7 @@ def get_metrics():
         
     return JSONResponse({
         "Modelo": "RandomForest",
+        "Model_Type": "demo" if using_demo_model else "real",
         "Accuracy": round(accuracy, 4) if accuracy else 0,
         "Precision": round(precision, 4) if precision else 0,
         "Recall": round(recall, 4) if recall else 0,
@@ -306,6 +364,7 @@ def health_check():
     return {
         "status": "healthy" if not initialization_error else "unhealthy",
         "timestamp": datetime.now().isoformat(),
+        "model_type": "demo" if using_demo_model else "real",
         "initialization_error": initialization_error
     }
 
@@ -318,6 +377,7 @@ def debug_files():
         "columnas_esperadas.pkl": os.path.exists(COLUMNS_PATH),
         "label_encoders.pkl": os.path.exists(ENCODERS_PATH),
         "bank-full.csv": os.path.exists(DATA_PATH),
-        "working_directory": BASE_DIR
+        "working_directory": BASE_DIR,
+        "using_demo_model": using_demo_model
     }
     return files
