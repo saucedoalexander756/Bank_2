@@ -104,7 +104,7 @@ import os
 # Configuración para producción/desarrollo
 if os.environ.get("RAILWAY_ENVIRONMENT"):
     # En Railway
-    API_BASE_URL = os.environ.get("API_URL", "")  # URL de tu API en Railway
+    API_BASE_URL = os.environ.get("API_URL", "https://bank2-production-1e69.up.railway.app")  # URL de tu API en Railway
 else:
     # Desarrollo local
     API_BASE_URL = "http://127.0.0.1:8000"

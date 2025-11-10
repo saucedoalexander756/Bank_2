@@ -6,7 +6,7 @@ from datetime import datetime
 # ========================
 # CONFIGURACIÓN
 # ========================
-API_URL = "http://127.0.0.1:8000/metrics"  # Usamos 127.0.0.1 para consistencia
+API_URL = "https://bank2-production-1e69.up.railway.app"  # Usamos 127.0.0.1 para consistencia
 DB_HOST = "localhost"
 DB_PORT = 3306            
 DB_USER = "root"
