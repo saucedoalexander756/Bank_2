@@ -7,13 +7,13 @@ from datetime import datetime
 # ========================
 # CONFIGURACIÓN
 # ========================
-API_URL = "http://127.0.0.1:8000/metrics"  # Usamos 127.0.0.1 para consistencia
+API_URL = "http://127.0.0.1:8000/metrics"  
 DB_HOST = "localhost"
 DB_PORT = 3306            
 DB_USER = "root"
 DB_PASSWORD = "root1234"
 DB_NAME = "monitor_modelos"
-INTERVAL_SECONDS = 3600    # Frecuencia: 3600 segundos = 1 hora
+INTERVAL_SECONDS = 3600    # Frecuencia: una hora
 
 def connect_db():
     """Establece la conexión a la base de datos MySQL."""
