@@ -98,8 +98,18 @@ h1, h2, h3 {color: #212529; font-weight: 600;}
 """, unsafe_allow_html=True)
 
 
-# --- Constantes y Funciones ---
-API_BASE_URL = "http://127.0.0.1:8000" 
+# Al inicio del archivo, después de los imports:
+import os
+
+# Configuración para producción/desarrollo
+if os.environ.get("RAILWAY_ENVIRONMENT"):
+    # En Railway
+    API_BASE_URL = os.environ.get("API_URL", "")  # URL de tu API en Railway
+else:
+    # Desarrollo local
+    API_BASE_URL = "http://127.0.0.1:8000"
+
+# El resto del código permanece igual...
 
 # Datos de simulación (se mantienen como respaldo si la API falla)
 data_simulacion = {
@@ -155,7 +165,8 @@ def fetch_metrics_from_api(base_url):
                 'precision': data.pop('Precision'),
                 'recall': data.pop('Recall'),
                 'f1_score': data.pop('F1_Score'),
-                'roc_auc': data.pop('ROC_AUC'),
+                'roc_auc': data.pop('ROC_AUC')
+
             }
             # La CM viene como una lista de listas [[TN, FP], [FN, TP]]
             data['confusionMatrix'] = data.pop('Confusion_Matrix')
@@ -401,7 +412,7 @@ if data:
     
             metric_to_plot = st.selectbox(
                 "Selecciona la Métrica a Visualizar:",
-                ('Accuracy', 'Recall', 'F1_Score', 'Precision', 'Roc_Auc'),#Auc
+                ('Accuracy', 'Recall', 'F1_score', 'Precision', 'Roc_auc'),
                 index=0
             )
             
@@ -506,3 +517,5 @@ if data:
 # Si la conexión falla y no hay fallback
 if not data:
     st.error("No se pudo obtener ninguna métrica. Asegúrate de que la API de FastAPI esté corriendo en `http://127.0.0.1:8000`.")
+
+    

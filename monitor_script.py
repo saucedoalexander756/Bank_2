@@ -2,18 +2,17 @@ import requests
 import mysql.connector
 import time
 from datetime import datetime
-############################CONTRASEÑAMYSQL
 
 # ========================
 # CONFIGURACIÓN
 # ========================
-API_URL = "http://127.0.0.1:8000/metrics"  
+API_URL = "http://127.0.0.1:8000/metrics"  # Usamos 127.0.0.1 para consistencia
 DB_HOST = "localhost"
 DB_PORT = 3306            
 DB_USER = "root"
 DB_PASSWORD = "root1234"
 DB_NAME = "monitor_modelos"
-INTERVAL_SECONDS = 3600    # Frecuencia: una hora
+INTERVAL_SECONDS = 3600    # Frecuencia: 3600 segundos = 1 hora
 
 def connect_db():
     """Establece la conexión a la base de datos MySQL."""
@@ -110,4 +109,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

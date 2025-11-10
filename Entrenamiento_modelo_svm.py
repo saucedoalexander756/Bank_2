@@ -1,91 +1,80 @@
+import os
 import pandas as pd
-import numpy as np
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.model_selection import train_test_split
-from sklearn.svm import SVC
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 import joblib
-from tqdm import tqdm  # <-- barra de progreso
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
 
-# ====== Cargar CSV completo ======
-print("Cargando CSV...")
-df = pd.read_csv("bank_sample.csv", sep=';')
-print(f"✅ CSV cargado ({len(df)} filas)")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ====== Crear subset balanceado de 50k datos ======
-print("Creando subset balanceado de 50k filas...")
-n_total = 50000
-pos_df = df[df['y']=='yes']
-neg_df = df[df['y']=='no']
+# ===============================
+# 1️⃣ Eliminar modelos antiguos
+# ===============================
+archivos = ["modelo_rf.pkl", "scaler.pkl", "label_encoders.pkl", "columnas_esperadas.pkl"]
+for f in archivos:
+    ruta = os.path.join(BASE_DIR, f)
+    if os.path.exists(ruta):
+        os.remove(ruta)
+        print(f"🗑️ Eliminado: {f}")
 
-ratio_pos = len(pos_df) / len(df)
-n_pos = int(n_total * ratio_pos)
-n_neg = n_total - n_pos
+# ===============================
+# 2️⃣ Cargar datos
+# ===============================
+df = pd.read_csv(os.path.join(BASE_DIR, "bank-full.csv"), sep=';')
+df['y'] = df['y'].map({'yes': 1, 'no': 0})
 
-pos_sample = pos_df.sample(n=n_pos, random_state=42)
-neg_sample = neg_df.sample(n=n_neg, random_state=42)
+# ===============================
+# 3️⃣ Separar columnas categóricas y numéricas
+# ===============================
+categorical_cols = df.select_dtypes(include=['object']).columns.tolist()
+numeric_cols = ['age','balance','day','duration','campaign','pdays','previous']
 
-df_sample = pd.concat([pos_sample, neg_sample]).sample(frac=1, random_state=42)
-print(f"✅ Subset creado ({len(df_sample)} filas)")
-
-# ====== Separar features y target ======
-X = df_sample.drop('y', axis=1)
-y = df_sample['y']
-
-cat_cols = ['job','marital','education','default','housing','loan','contact','month','poutcome']
-num_cols = ['age','balance','day','duration','campaign','pdays','previous']
-
-# ====== LabelEncoder para variables categóricas ======
-print("Codificando variables categóricas...")
-label_encoders = {}
-for i, col in enumerate(tqdm(cat_cols, desc="Categorical columns")):
+# ===============================
+# 4️⃣ Codificar categorías
+# ===============================
+encoders = {}
+df_encoded = df.copy()
+for col in categorical_cols:
     le = LabelEncoder()
-    X[col] = le.fit_transform(X[col])
-    label_encoders[col] = le
+    df_encoded[col] = le.fit_transform(df_encoded[col])
+    encoders[col] = le
 
-# Target encoder
-y_le = LabelEncoder()
-y = y_le.fit_transform(y)  # 0/1
-print("✅ Variables categóricas codificadas")
-
-# ====== Escalado ======
-print("Escalando variables numéricas...")
+# ===============================
+# 5️⃣ Escalar columnas numéricas
+# ===============================
 scaler = StandardScaler()
-X[num_cols] = scaler.fit_transform(X[num_cols])
-print("✅ Escalado completado")
+df_encoded[numeric_cols] = scaler.fit_transform(df_encoded[numeric_cols])
 
-# ====== Split train/test ======
-print("Separando datos en entrenamiento y prueba...")
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42, stratify=y
-)
-print(f"✅ Datos listos (Train: {len(X_train)}, Test: {len(X_test)})")
+# ===============================
+# 6️⃣ Separar X e y
+# ===============================
+X = df_encoded.drop('y', axis=1)
+y = df_encoded['y']
 
-# ====== Entrenamiento SVM ======
-print("Entrenando modelo SVM (kernel linear, balanceado)...")
-svm_model = SVC(kernel='linear', class_weight='balanced', probability=True, random_state=42)
+# Guardar columnas esperadas
+columnas_esperadas = X.columns.tolist()
+joblib.dump(columnas_esperadas, os.path.join(BASE_DIR, "columnas_esperadas.pkl"))
 
-# Mostrar barra de progreso “simulada” porque SVC.fit no da updates por defecto
-for i in tqdm(range(1), desc="SVM Training"):
-    svm_model.fit(X_train, y_train)
+# ===============================
+# 7️⃣ Entrenar RandomForest
+# ===============================
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X_train, y_train)
 
-print("✅ Entrenamiento completado")
+# ===============================
+# 8️⃣ Evaluar
+# ===============================
+y_pred = model.predict(X_test)
+acc = accuracy_score(y_test, y_pred)
+print(f"✅ Accuracy RandomForest: {acc:.4f}")
 
-# ====== Evaluación rápida ======
-y_pred = svm_model.predict(X_test)
-y_proba = svm_model.predict_proba(X_test)[:,1]
+# ===============================
+# 9️⃣ Guardar artefactos
+# ===============================
+joblib.dump(model, os.path.join(BASE_DIR, "modelo_rf.pkl"))
+joblib.dump(scaler, os.path.join(BASE_DIR, "scaler.pkl"))
+joblib.dump(encoders, os.path.join(BASE_DIR, "label_encoders.pkl"))
 
-print("==== Métricas del modelo ====")
-print("Accuracy:", accuracy_score(y_test, y_pred))
-print("Precision:", precision_score(y_test, y_pred))
-print("Recall:", recall_score(y_test, y_pred))
-print("F1:", f1_score(y_test, y_pred))
-print("ROC AUC:", roc_auc_score(y_test, y_proba))
-
-# ====== Guardar modelos para dashboard ======
-print("Guardando modelos...")
-joblib.dump(svm_model, "modelo_svm.pkl")
-joblib.dump(scaler, "scaler.pkl")
-joblib.dump(label_encoders, "label_encoders.pkl")
-joblib.dump(y_le, "target_encoder.pkl")
-print("✅ Modelos entrenados y guardados correctamente")
+print("✅ Entrenamiento completado. Artefactos guardados: modelo_rf.pkl, scaler.pkl, label_encoders.pkl, columnas_esperadas.pkl")
